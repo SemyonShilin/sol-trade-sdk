@@ -19,6 +19,13 @@ pub struct SolRpcClient {
 
 #[async_trait::async_trait]
 impl SwqosClientTrait for SolRpcClient {
+    /// `getHealth` — the cheapest call the node answers — purely to keep this
+    /// client's pooled connection (and TLS session) alive between submits.
+    async fn warmup(&self) -> Result<()> {
+        self.rpc_client.get_health().await?;
+        Ok(())
+    }
+
     async fn send_transaction(
         &self,
         trade_type: TradeType,
