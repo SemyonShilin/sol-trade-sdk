@@ -15,3 +15,8 @@ pub use client::{
     SellAmount, SimpleBuyParams, SimpleSellParams, SolanaTrade, TradeBuyParams, TradeRiskGate,
     TradeSellParams, TradeTokenType, TradingClient, TradingInfrastructure,
 };
+pub use trading::core::params::{
+    StonkFunMemeLeg, StonkFunParams, StonkFunQuoteHop, StonkFunQuoteHopPreview, StonkFunQuoteRoute,
+    StonkFunQuoteRoutePreview, StonkFunQuoteVenue, StonkFunSolHop, StonkFunSwapParams,
+    StonkFunViaQuoteParams, StonkFunViaSolParams,
+};

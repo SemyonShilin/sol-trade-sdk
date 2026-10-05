@@ -10,10 +10,14 @@ use std::sync::Arc;
 
 use super::bonk::BonkParams;
 use super::meteora_damm_v2::MeteoraDammV2Params;
+use super::meteora_dlmm::MeteoraDlmmParams;
 use super::pumpfun::PumpFunParams;
 use super::pumpswap::PumpSwapParams;
 use super::raydium_amm_v4::RaydiumAmmV4Params;
+use super::raydium_clmm::RaydiumClmmParams;
 use super::raydium_cpmm::RaydiumCpmmParams;
+use super::stonkfun_via_sol::StonkFunViaSolParams;
+use super::whirlpool::WhirlpoolParams;
 
 /// Concurrency + core binding config for parallel submit (precomputed at SDK init, one param on hot path). Uses Arc so no borrow of SwapParams.
 #[derive(Clone)]
@@ -33,9 +37,18 @@ pub enum DexParamEnum {
     StonkFun(BonkParams),
     /// Graduated StonkFun pool parameters backed by the external CPMM venue.
     StonkFunSwap(RaydiumCpmmParams),
+    /// SOL/WSOL/USDC ↔ quote ↔ meme, or direct quote↔meme when the endpoint matches.
+    ///
+    /// Works for both the LaunchLab curve and graduated CPMM meme legs.
+    StonkFunViaSol(StonkFunViaSolParams),
+    /// Standalone quote conversion, also used by StonkFunViaSol internally.
+    StonkFunQuoteRoute(super::StonkFunQuoteRoute),
     RaydiumCpmm(RaydiumCpmmParams),
     RaydiumAmmV4(RaydiumAmmV4Params),
     MeteoraDammV2(MeteoraDammV2Params),
+    RaydiumClmm(RaydiumClmmParams),
+    OrcaWhirlpool(WhirlpoolParams),
+    MeteoraDlmm(MeteoraDlmmParams),
 }
 
 impl DexParamEnum {
@@ -49,9 +62,14 @@ impl DexParamEnum {
             DexParamEnum::Bonk(p) => p,
             DexParamEnum::StonkFun(p) => p,
             DexParamEnum::StonkFunSwap(p) => p,
+            DexParamEnum::StonkFunViaSol(p) => p,
+            DexParamEnum::StonkFunQuoteRoute(p) => p,
             DexParamEnum::RaydiumCpmm(p) => p,
             DexParamEnum::RaydiumAmmV4(p) => p,
             DexParamEnum::MeteoraDammV2(p) => p,
+            DexParamEnum::RaydiumClmm(p) => p,
+            DexParamEnum::OrcaWhirlpool(p) => p,
+            DexParamEnum::MeteoraDlmm(p) => p,
         }
     }
 }
@@ -121,6 +139,18 @@ pub struct SwapParams {
 }
 
 impl SwapParams {
+    /// Removes executor RPC access and rejects RPC-dependent simulation/confirmation.
+    /// Supply blockhash/nonce and ALTs from background caches. Configure submission
+    /// providers separately (an RPC sender still submits over RPC).
+    pub fn without_rpc(mut self) -> anyhow::Result<Self> {
+        anyhow::ensure!(!self.simulate, "RPC-free execution cannot simulate transactions");
+        anyhow::ensure!(
+            !self.wait_tx_confirmed,
+            "RPC-free execution requires subscription-based confirmation outside the executor"
+        );
+        self.rpc = None;
+        Ok(self)
+    }
     /// One struct for execute_parallel: merges sender_thread_cores, effective_core_ids, max_sender_concurrency. Arc clone only.
     #[inline]
     pub fn sender_concurrency_config(&self) -> SenderConcurrencyConfig {
