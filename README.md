@@ -49,13 +49,13 @@
   - [⚡ Trading Parameters](#-trading-parameters)
   - [📊 Usage Examples Summary Table](#-usage-examples-summary-table)
   - [⚙️ SWQoS Service Configuration](#️-swqos-service-configuration)
-  - [Astralane (Binary / Plain / QUIC)](#astralane-binary--plain--quic)
+  - [Astralane (Binary / Plain / QUIC)](#astralane-binary--plain-http--quic)
   - [Glaive (Binary HTTP / QUIC)](#glaive-binary-http--quic)
   - [🔧 Middleware System](#-middleware-system)
   - [🔍 Address Lookup Tables](#-address-lookup-tables)
-  - [🔍 Nonce Cache](#-nonce-cache)
+  - [🔍 Nonce Cache](#-durable-nonce)
 - [💰 Cashback Support (PumpFun / PumpSwap)](#-cashback-support-pumpfun--pumpswap)
-- [🔄 PumpFun V1 vs V2 Instructions](#-pumpfun-v1-vs-v2-instructions)
+- [🔄 PumpFun V1 vs V2 Instructions](#pumpfun-unified-buysell-with-v1v2-instructions)
 - [🛡️ MEV Protection Services](#️-mev-protection-services)
 - [📁 Project Structure](#-project-structure)
 - [📄 License](#-license)
@@ -64,16 +64,28 @@
 
 ---
 
-## 📦 SDK Versions
+## 📦 SDK Versions and Related SDKs
 
-This SDK is available in multiple languages:
+Trading SDK language versions and related Rust SDKs:
 
-| Language | Repository | Description |
-|----------|------------|-------------|
-| **Rust** | [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) | Ultra-low latency with zero-copy optimization |
-| **Node.js** | [sol-trade-sdk-nodejs](https://github.com/0xfnzero/sol-trade-sdk-nodejs) | TypeScript/JavaScript for Node.js |
-| **Python** | [sol-trade-sdk-python](https://github.com/0xfnzero/sol-trade-sdk-python) | Async/await native support |
-| **Go** | [sol-trade-sdk-golang](https://github.com/0xfnzero/sol-trade-sdk-golang) | Concurrent-safe with goroutine support |
+| Language | Repository | Description | Version |
+|----------|------------|-------------|---------|
+| **Rust** | [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) | Ultra-low latency with zero-copy optimization | `v6.0.0` |
+| **Node.js** | [sol-trade-sdk-nodejs](https://github.com/0xfnzero/sol-trade-sdk-nodejs) | TypeScript/JavaScript for Node.js | `v0.1.8` |
+| **Python** | [sol-trade-sdk-python](https://github.com/0xfnzero/sol-trade-sdk-python) | Async/await native support | `v0.1.8` |
+| **Go** | [sol-trade-sdk-golang](https://github.com/0xfnzero/sol-trade-sdk-golang) | Concurrent-safe with goroutine support | `v0.1.9` |
+| **Rust** | [sol-parser-sdk](https://github.com/0xfnzero/sol-parser-sdk) | Solana DEX transaction and account event parsing | `v0.7.11` |
+| **Rust** | [sol-shred-sdk](https://github.com/0xfnzero/sol-shred-sdk) | Raw Solana shred decoding and ShredStream DEX event parsing | `v4.0.3` |
+
+## v6.0.0 — Signed transaction and hot-path hardening
+
+Adds optional decimal SOL minimum tips to SWQoS provider configuration. Providers below the configured threshold are skipped before instruction construction, signing and submission; equality remains eligible and omitted thresholds preserve existing behavior.
+
+Breaking migration: provider tuple constructors now take a final `Option<f64>` argument, for example `SwqosConfig::Jito(api_key, region, endpoint, Some(0.0001))`. Pass `None` to retain previous behavior. `Default(String)` is unchanged.
+
+Hardens cached preparation, durable nonce lifecycle, transaction pools and integer transfer-fee boundaries. Adds signed transaction, ALT and offline bank regression coverage.
+
+Validation includes local CPU benchmarks and offline signed-bank scenarios. Measured hot paths use cached inputs without RPC. Benchmarks do not establish production network or transaction-landing latency. No funded mainnet transactions were broadcast.
 
 ## What This SDK Is For
 
@@ -88,7 +100,7 @@ This SDK is available in multiple languages:
 
 ## 🔖 Current Release
 
-**Rust crate:** `sol-trade-sdk = "5.0.7"`
+**Rust crate:** `sol-trade-sdk = "6.0.0"`
 
 Version 5.0.7 updates CPMM creator-fee collection to the protocol-share upgrade: both collection builders append the required share PDA/config accounts, and AmmConfig decoding exposes the share rate. Adds cached gRPC preparation and collection/swap/LP simulation examples with offline mainnet fixtures. Uses parser 0.7.8 and streamer 3.0.7. See [CPMM migration](docs/cpmm-creator-fee-share.md).
 
@@ -181,14 +193,14 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 # Add to your Cargo.toml
-sol-trade-sdk = { path = "./sol-trade-sdk", version = "5.0.7" }
+sol-trade-sdk = { path = "./sol-trade-sdk", version = "6.0.0" }
 ```
 
 ### Use crates.io
 
 ```toml
 # Add to your Cargo.toml
-sol-trade-sdk = "5.0.7"
+sol-trade-sdk = "6.0.0"
 ```
 
 ## 🛠️ Usage Examples
@@ -209,36 +221,36 @@ let commitment = CommitmentConfig::processed();
 // Multiple SWQoS services can be configured
 let swqos_configs: Vec<SwqosConfig> = vec![
     SwqosConfig::Default(rpc_url.clone()),
-    SwqosConfig::Jito("your uuid".to_string(), SwqosRegion::Frankfurt, None),
-    SwqosConfig::Temporal("your api_token".to_string(), SwqosRegion::Frankfurt, None),
-    SwqosConfig::FlashBlock("your api_token".to_string(), SwqosRegion::Frankfurt, None),
+    SwqosConfig::Jito("your uuid".to_string(), SwqosRegion::Frankfurt, None, None),
+    SwqosConfig::Temporal("your api_token".to_string(), SwqosRegion::Frankfurt, None, None),
+    SwqosConfig::FlashBlock("your api_token".to_string(), SwqosRegion::Frankfurt, None, None),
     // None transport = gRPC first, JSON HTTP fallback
-    SwqosConfig::BlockRazor("your api_token".to_string(), SwqosRegion::Frankfurt, None, None),
+    SwqosConfig::BlockRazor("your api_token".to_string(), SwqosRegion::Frankfurt, None, None, None),
     // None mode = persistent QUIC first, Binary HTTP fallback
-    SwqosConfig::Astralane("your_astralane_api_key".to_string(), SwqosRegion::Frankfurt, None, None),
+    SwqosConfig::Astralane("your_astralane_api_key".to_string(), SwqosRegion::Frankfurt, None, None, None),
     SwqosConfig::SpeedLanding("your api_token".to_string(), SwqosRegion::Frankfurt, None),
     // Lunar Lander: 4th param None = QUIC (default); Some(SwqosTransport::Http) = binary HTTP
-    SwqosConfig::LunarLander("your_hellomoon_api_key".to_string(), SwqosRegion::Frankfurt, None, None),
+    SwqosConfig::LunarLander("your_hellomoon_api_key".to_string(), SwqosRegion::Frankfurt, None, None, None),
     SwqosConfig::LunarLander(
         "your_hellomoon_api_key".to_string(),
         SwqosRegion::Frankfurt,
         None,
         Some(SwqosTransport::Http),
-    ),
+    None, ),
     // Glaive: None = QUIC (default, UDP/4000); Some(Http) = binary HTTP
     SwqosConfig::Glaive(
         "your_glaive_uuid_v4_api_key".to_string(),
         SwqosRegion::Frankfurt,
         None,
         None,
-    ),
+    None, ),
 ];
 // Create TradeConfig instance
 let trade_config = TradeConfig::builder(rpc_url, swqos_configs, commitment)
     // .transaction_version(TradeTransactionVersion::V1) // default: V0-compatible mode
     // .create_wsol_ata_on_startup(true)  // default: true  - check & create WSOL ATA on init
     // .use_seed_optimize(true)            // default: true  - seed optimization for ATA ops
-    // .log_enabled(true)                  // default: true  - SDK timing / SWQOS logs
+    // .log_enabled(true)                  // default: false - opt in to synchronous SDK timing / SWQOS logs
     // .check_min_tip(false)               // default: false - filter SWQOS below min tip
     // .swqos_cores_from_end(false)        // default: false - bind SWQOS to last N CPU cores
     // .mev_protection(false)              // default: false - MEV protection for Astralane / BlockRazor / Glaive
@@ -458,7 +470,7 @@ let jito_config = SwqosConfig::Jito(
     "your_uuid".to_string(),
     SwqosRegion::Frankfurt, // This parameter is still required but will be ignored
     Some("https://custom-jito-endpoint.com".to_string()) // Custom URL
-);
+, None);
 
 // Using default regional endpoint (third parameter is None)
 let temporal_config = SwqosConfig::Temporal(
@@ -515,7 +527,7 @@ let swqos_configs: Vec<SwqosConfig> = vec![
         SwqosRegion::Frankfurt,
         None,
         Some(AstralaneTransport::Quic),
-    ),
+    None, ),
 ];
 // Then create TradeConfig / TradingClient as usual with swqos_configs
 ```
@@ -547,7 +559,7 @@ let glaive_http = SwqosConfig::Glaive(
     SwqosRegion::Frankfurt,
     None, // http://fra.glaive.trade/binary?api-key=...
     Some(SwqosTransport::Http),
-);
+None, );
 ```
 
 - **QUIC** (default): `None` or `Some(SwqosTransport::Quic)`. Uses UDP port `4000`, ALPN `solana-tpu`, SNI `glaive-intake`, one persistent authenticated connection, and one unidirectional stream per transaction.
@@ -726,7 +738,7 @@ MIT License
 
 ## ⏱️ Timing metrics (v3.5.0+)
 
-When `log_enabled` and SDK log are on, the executor prints `[SDK] Buy/Sell timing(...)`. **Semantics changed in v3.5.0**: `submit` is now only the send to SWQOS/RPC; `confirm` is separate; `start_to_submit` (when `grpc_recv_us` is set) is **end-to-end from gRPC event to submit**, so it is larger than in-process timings. See [docs/TIMING_METRICS.md](docs/TIMING_METRICS.md) for definitions and how to compare with older versions.
+When `log_enabled` and SDK log are on, the executor prints `[SDK] Buy/Sell timing(...)`. **Semantics changed in v3.5.0**: `submit` is now only the send to SWQOS/RPC; `confirm` is separate; `start_to_submit` (when `grpc_recv_us` is set) is **end-to-end from gRPC event to submit**, so it is larger than in-process timings. See [submit and confirmation timing](docs/LOW_LATENCY_BOTS.md#submit-and-confirmation-latency) for definitions and how to compare with older versions.
 
 ## ⚠️ Important Notes
 
@@ -735,3 +747,27 @@ When `log_enabled` and SDK log are on, the executor prints `[SDK] Buy/Sell timin
 3. Pay attention to slippage settings to avoid transaction failures
 4. Monitor balances and transaction fees
 5. Comply with relevant laws and regulations
+
+## Usage documentation
+
+- [Trading parameters](docs/TRADING_PARAMETERS.md)
+- [Fee strategies](docs/GAS_FEE_STRATEGY.md)
+- [Durable nonce](docs/NONCE_CACHE.md)
+- [Address lookup tables](docs/ADDRESS_LOOKUP_TABLE.md)
+- [Low-latency integration](docs/LOW_LATENCY_BOTS.md)
+- [Pre-buy risk gate](docs/PRE_BUY_RISK_GATE.md)
+- [Pump cashback](docs/PUMP_CASHBACK_README.md)
+- [Pump 错误排查](docs/PUMP_ERRORS_AND_TROUBLESHOOTING_CN.md)
+- [StonkFun routes](docs/STONKFUN_ROUTES.md)
+- [gRPC cache and simulation](docs/STONKFUN_GRPC_EXAMPLES.md)
+- [CPMM creator-fee](docs/cpmm-creator-fee-share.md)
+
+### Optional per-route minimum tip
+
+Each SWQOS route can optionally set a minimum tip in SOL, accepting decimals such as `0.0001` (internally rounded to whole lamports). Buy/sell fee lanes below this threshold are skipped before building the route tip instruction, signing or submitting its transaction. Equality is accepted. Omitting the option preserves existing behavior; zero accepts non-negative tips. This limit applies independently of the existing `check_min_tip` / `checkMinTip` option, whose behavior is preserved. Other eligible routes, including default RPC, still participate.
+
+```rust
+let provider = SwqosConfig::Jito(
+    "your_uuid".to_string(), SwqosRegion::Frankfurt, None, Some(0.0001),
+); // Minimum tip: 0.0001 SOL; use None to omit the limit.
+```
